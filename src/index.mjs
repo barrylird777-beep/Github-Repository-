@@ -5,7 +5,7 @@ import { Wal } from "./wal/wal.mjs";
 import { PostgresQueue } from "./queue/postgres-queue.mjs";
 import { normalizeEvent } from "./normalize/normalize.mjs";
 
-const pool = config.databaseUrl ? new pg.Pool({ connectionString: config.databaseUrl, max: 10, idleTimeoutMillis: 30000 }) : null;
+const pool = /^postgres(?:ql)?:\\/\\//i.test(config.databaseUrl) ? new pg.Pool({ connectionString: config.databaseUrl, max: 10, idleTimeoutMillis: 30000 }) : null;
 const wal = new Wal(config.walDir);
 await wal.init();
 
