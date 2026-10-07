@@ -68,7 +68,8 @@ const server=http.createServer(async(req,res)=>{try{const u=new URL(req.url,"htt
 server.listen(config.port,"0.0.0.0",()=>console.log("opportunity engine listening on "+config.port));
 let workBusy=false,scanBusy=false;
 const workTimer=setInterval(()=>{if(!workBusy){workBusy=true;work().catch(console.error).finally(()=>workBusy=false)}},config.pollMs);
-const sniperTimer=setInterval(()=>{sniff().catch(console.error)},config.sniperMs);\nconst scanTimer=setInterval(()=>{if(!scanBusy){scanBusy=true;scan().catch(console.error).finally(()=>scanBusy=false)}},config.scannerMs);
+const sniperTimer=setInterval(()=>{sniff().catch(console.error)},config.sniperMs);
+const scanTimer=setInterval(()=>{if(!scanBusy){scanBusy=true;scan().catch(console.error).finally(()=>scanBusy=false)}},config.scannerMs);
 await sniff();await scan();
 async function shutdown(){if(stopping)return;stopping=true;clearInterval(workTimer);clearInterval(sniperTimer);clearInterval(scanTimer);server.close();if(queue)await queue.shutdown();if(pool)await pool.end();process.exit(0)}
 process.on("SIGTERM",shutdown);process.on("SIGINT",shutdown);
