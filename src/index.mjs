@@ -47,7 +47,7 @@ async function scan(){
  try{
   const result=await scanner.scan();
   for(const opportunity of result.opportunities)if(queue)await queue.saveOpportunity(opportunity,opportunity.observed_at);
-  lastScan={status:"ok",pools:result.pools,opportunities:result.opportunities.length,at:new Date().toISOString(),error:null};
+  lastScan={status:"ok",pools:result.pools,opportunities:result.opportunities.length,at:new Date().toISOString(),error:null};console.log("scan complete",JSON.stringify(lastScan));
   if(pool)await pool.query("INSERT INTO engine_state(key,value,updated_at) VALUES('scanner',$1,now()) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()",[lastScan]);
  }catch(e){lastScan={...lastScan,status:"error",at:new Date().toISOString(),error:String(e?.message||e)};console.error("scanner",e)}
 }
