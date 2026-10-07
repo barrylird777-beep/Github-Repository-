@@ -24,10 +24,10 @@ if(pool)await pool.query(`
   attempts INTEGER NOT NULL DEFAULT 0,lease_token UUID,lease_until TIMESTAMPTZ,last_error TEXT,
   next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
+ ALTER TABLE ingestion_events ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now();
  CREATE INDEX IF NOT EXISTS ingestion_events_queue_idx ON ingestion_events(status,id);
  CREATE INDEX IF NOT EXISTS ingestion_events_lease_idx ON ingestion_events(status,lease_until);
  CREATE INDEX IF NOT EXISTS ingestion_events_ready_idx ON ingestion_events(status,next_attempt_at,id);
- ALTER TABLE ingestion_events ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now();
  CREATE TABLE IF NOT EXISTS ingestion_dead_letter(
   id BIGSERIAL PRIMARY KEY,ingestion_id BIGINT NOT NULL UNIQUE REFERENCES ingestion_events(id) ON DELETE CASCADE,
   fingerprint TEXT NOT NULL,source TEXT NOT NULL,sequence BIGINT,payload JSONB NOT NULL,
