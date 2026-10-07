@@ -6,6 +6,8 @@ import {PostgresQueue} from "./queue/postgres-queue.mjs";
 import {normalizeEvent} from "./normalize/normalize.mjs";
 import {UniswapV3Scanner} from "./scanner/uniswap-v3.mjs";
 import {RawSniper} from "./scanner/raw-sniper.mjs";
+import {PrivateMesh} from "./network/private-mesh.mjs";
+import {BountyScanner} from "./bounty/bounty-scanner.mjs";
 import {extract} from "./extract/instant-extract.mjs";
 
 const pool=/^postgres(?:ql)?:\/\//i.test(config.databaseUrl)
@@ -34,6 +36,8 @@ if(pool)await pool.query(`
 const queue=pool?new PostgresQueue(pool,{leaseSeconds:config.leaseSeconds,maxAttempts:config.maxAttempts}):null;
 const scanner=new UniswapV3Scanner({rpcUrl:config.rpcUrl,chainId:config.chainId,notionalUsd:config.scanNotionalUsd});
 const sniper=new RawSniper({rpcUrl:config.rpcUrl,chainId:config.chainId});
+const bountyScanner=new BountyScanner({token:process.env.GITHUB_TOKEN||""});
+const mesh=process.env.MESH_SECRET?new PrivateMesh({secret:process.env.MESH_SECRET,maxLanes:8}):null;
 let sniperState={status:"starting",events:0,lastBlock:0,error:null};
 let lastScan={status:"not_run",pools:0,opportunities:0,at:null,error:null};
 let stopping=false;
@@ -75,12 +79,13 @@ async function extractRoute(req,res){
     return json(res,400,{ok:false,error:String(e?.message||e)});
   }
 }
-const server=http.createServer(async(req,res)=>{try{const u=new URL(req.url,"http://localhost");if(req.method==="GET"&&(u.pathname==="/"||u.pathname==="/dashboard")){res.writeHead(200,{"content-type":"text/html; charset=utf-8","cache-control":"no-store"});return res.end(dashboard())}if(req.method==="GET"&&u.pathname==="/health"){return json(res,200,{status:"ok",service:"opportunity-feed-intelligence",postgres:Boolean(pool),rpc:Boolean(config.rpcUrl),chainId:config.chainId,queue:queue?await queue.stats():null,scanner:lastScan,rawSniper:sniperState})}if(u.pathname==="/api/extract")return extractRoute(req,res);if(req.method==="GET"&&u.pathname==="/api/opportunities"){if(!pool)return json(res,503,{error:"PostgreSQL is not configured"});const r=await pool.query("SELECT id,kind,chain_id,token_in,token_out,buy_pool,sell_pool,gross_edge_bps,estimated_gas_usd,estimated_slippage_usd,estimated_net_profit_usd,observed_at FROM opportunities ORDER BY estimated_net_profit_usd DESC NULLS LAST,observed_at DESC LIMIT 100");return json(res,200,{items:r.rows})}if(req.method==="POST"&&u.pathname==="/api/ingest"){const b=await read(req);if(!b.source)return json(res,400,{error:"source required"});return json(res,202,{ok:true,event:await ingest(b.source,b.payload,b.sequence??null)})}if(req.method==="POST"&&u.pathname==="/api/scan"){await sniff();await scan();return json(res,200,lastScan)}return json(res,404,{error:"not found"})}catch(e){return json(res,500,{error:String(e?.message||e)})}});
+const server=http.createServer(async(req,res)=>{try{const u=new URL(req.url,"http://localhost");if(req.method==="GET"&&(u.pathname==="/"||u.pathname==="/dashboard")){res.writeHead(200,{"content-type":"text/html; charset=utf-8","cache-control":"no-store"});return res.end(dashboard())}if(req.method==="GET"&&u.pathname==="/health"){return json(res,200,{status:"ok",service:"opportunity-feed-intelligence",postgres:Boolean(pool),rpc:Boolean(config.rpcUrl),chainId:config.chainId,queue:queue?await queue.stats():null,scanner:lastScan,rawSniper:sniperState})}if(u.pathname==="/api/extract")return extractRoute(req,res);if(req.method==="GET"&&u.pathname==="/api/network"){return json(res,200,{configured:Boolean(mesh),status:mesh?mesh.status():{status:"unconfigured",reason:"MESH_SECRET not set"}})}if(req.method==="GET"&&u.pathname==="/api/bounties"){const items=await bountyScanner.scan();return json(res,200,{items})}if(req.method==="GET"&&u.pathname==="/api/opportunities"){if(!pool)return json(res,503,{error:"PostgreSQL is not configured"});const r=await pool.query("SELECT id,kind,chain_id,token_in,token_out,buy_pool,sell_pool,gross_edge_bps,estimated_gas_usd,estimated_slippage_usd,estimated_net_profit_usd,observed_at FROM opportunities ORDER BY estimated_net_profit_usd DESC NULLS LAST,observed_at DESC LIMIT 100");return json(res,200,{items:r.rows})}if(req.method==="POST"&&u.pathname==="/api/ingest"){const b=await read(req);if(!b.source)return json(res,400,{error:"source required"});return json(res,202,{ok:true,event:await ingest(b.source,b.payload,b.sequence??null)})}if(req.method==="POST"&&u.pathname==="/api/scan"){await sniff();await scan();if(mesh)await mesh.refresh();return json(res,200,lastScan)}return json(res,404,{error:"not found"})}catch(e){return json(res,500,{error:String(e?.message||e)})}});
 server.listen(config.port,"0.0.0.0",()=>console.log("opportunity engine listening on "+config.port));
 let workBusy=false,scanBusy=false;
 const workTimer=setInterval(()=>{if(!workBusy){workBusy=true;work().catch(console.error).finally(()=>workBusy=false)}},config.pollMs);
 const sniperTimer=setInterval(()=>{sniff().catch(console.error)},config.sniperMs);
 const scanTimer=setInterval(()=>{if(!scanBusy){scanBusy=true;scan().catch(console.error).finally(()=>scanBusy=false)}},config.scannerMs);
+const meshTimer=mesh?setInterval(()=>{mesh.refresh().catch(()=>{})},15000):null;
 await sniff();await scan();
-async function shutdown(){if(stopping)return;stopping=true;clearInterval(workTimer);clearInterval(sniperTimer);clearInterval(scanTimer);server.close();if(queue)await queue.shutdown();if(pool)await pool.end();process.exit(0)}
+async function shutdown(){if(stopping)return;stopping=true;clearInterval(workTimer);clearInterval(sniperTimer);clearInterval(scanTimer);if(meshTimer)clearInterval(meshTimer);server.close();if(queue)await queue.shutdown();if(pool)await pool.end();process.exit(0)}
 process.on("SIGTERM",shutdown);process.on("SIGINT",shutdown);
