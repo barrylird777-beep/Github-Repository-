@@ -22,9 +22,16 @@ if(pool)await pool.query(`
   observed_at TIMESTAMPTZ NOT NULL DEFAULT now(),payload JSONB NOT NULL,
   status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued','processing','processed','failed')),
   attempts INTEGER NOT NULL DEFAULT 0,lease_token UUID,lease_until TIMESTAMPTZ,last_error TEXT,
+  next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
  CREATE INDEX IF NOT EXISTS ingestion_events_queue_idx ON ingestion_events(status,id);
  CREATE INDEX IF NOT EXISTS ingestion_events_lease_idx ON ingestion_events(status,lease_until);
+ CREATE INDEX IF NOT EXISTS ingestion_events_ready_idx ON ingestion_events(status,next_attempt_at,id);
+ ALTER TABLE ingestion_events ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now();
+ CREATE TABLE IF NOT EXISTS ingestion_dead_letter(
+  id BIGSERIAL PRIMARY KEY,ingestion_id BIGINT NOT NULL UNIQUE REFERENCES ingestion_events(id) ON DELETE CASCADE,
+  fingerprint TEXT NOT NULL,source TEXT NOT NULL,sequence BIGINT,payload JSONB NOT NULL,
+  attempts INTEGER NOT NULL,last_error TEXT,failed_at TIMESTAMPTZ NOT NULL DEFAULT now());
  CREATE TABLE IF NOT EXISTS opportunities(
   id BIGSERIAL PRIMARY KEY,fingerprint TEXT NOT NULL UNIQUE,kind TEXT NOT NULL,chain_id INTEGER,
   token_in TEXT,token_out TEXT,buy_pool TEXT,sell_pool TEXT,gross_edge_bps NUMERIC NOT NULL,
