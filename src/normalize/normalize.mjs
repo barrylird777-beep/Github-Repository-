@@ -1,0 +1,2 @@
+import crypto from "node:crypto";
+export function normalizeEvent({source,payload,sequence=null}){const body=JSON.stringify(payload??null);return {fingerprint:crypto.createHash("sha256").update(String(source)+"\\n"+body).digest("hex"),source:String(source),sequence,payload:payload??null,observed_at:new Date().toISOString()};}
