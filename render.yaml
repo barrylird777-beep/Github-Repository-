@@ -25,9 +25,3 @@ services:
         value: "8"
       - key: WAL_DIR
         value: "./data"
-
-databases:
-  - name: opportunity-engine-db
-    plan: free
-    region: ohio
-    postgresMajorVersion: "18"
