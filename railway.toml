@@ -1,0 +1,1 @@
+[build]\nbuilder = "RAILPACK"\n\n[deploy]\nstartCommand = "node src/index.mjs"\nhealthcheckPath = "/health"\nhealthcheckTimeout = 30\nrestartPolicyType = "ALWAYS"\n
