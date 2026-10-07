@@ -4,5 +4,5 @@ const abi=["function quoteExactInput(bytes path,uint256 amountIn) returns(uint25
 export class QuoteEngine{
  constructor(provider){this.provider=provider;this.quoter=new ethers.Contract(QUOTER_V2,abi,provider)}
  path(a,fee,b){return ethers.solidityPacked(["address","uint24","address"],[a,fee,b])}
- async exactInput(tokenIn,fee,tokenOut,amountIn){const r=await this.quoter.quoteExactInput(this.path(tokenIn,fee,tokenOut),amountIn);return{amountOut:BigInt(r[0]),gasEstimate:BigInt(r[3])}}
+ async exactInput(tokenIn,fee,tokenOut,amountIn){const r=await this.quoter.quoteExactInput.staticCall(this.path(tokenIn,fee,tokenOut),amountIn);return{amountOut:BigInt(r[0]),gasEstimate:BigInt(r[3])}}
 }
