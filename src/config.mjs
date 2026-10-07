@@ -1,0 +1,1 @@
+export const config={port:Number(process.env.PORT||8080),databaseUrl:process.env.DATABASE_URL||"",rpcUrl:process.env.RPC_URL||"",chainId:Number(process.env.CHAIN_ID||1),pollMs:Math.max(250,Number(process.env.POLL_MS||1000)),workerBatchSize:Math.max(1,Number(process.env.WORKER_BATCH_SIZE||8)),walDir:process.env.WAL_DIR||"./data"};
