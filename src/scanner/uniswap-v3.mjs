@@ -3,11 +3,11 @@ import crypto from "node:crypto";
 import {QuoteEngine} from "./quote-engine.mjs";
 const FACTORY="0x1F98431c8aD98523631AE4a59f267346ea31F984";
 const TOKENS={
- WETH:{address:"0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",decimals:18},
- USDC:{address:"0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",decimals:6},
- USDT:{address:"0xdAC17F958D2ee523a2206206994597C13D831ec7",decimals:6},
- DAI:{address:"0x6B175474E89094C44Da98b954EedeAC495271d0F",decimals:18},
- WBTC:{address:"0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",decimals:8}
+ WETH:{address:"0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",decimals:18},
+ USDC:{address:"0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",decimals:6},
+ USDT:{address:"0xdac17f958d2ee523a2206206994597c13d831ec7",decimals:6},
+ DAI:{address:"0x6b175474e89094c44da98b954eedeac495271d0f",decimals:18},
+ WBTC:{address:"0x2260fac5e5542a773aa44fbcfedf7c193bc2c599",decimals:8}
 };
 const FEES=[100,500,3000,10000];
 const factoryAbi=["function getPool(address,address,uint24) view returns(address)"];
