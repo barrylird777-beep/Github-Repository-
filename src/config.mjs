@@ -10,5 +10,5 @@ export const config={
   scanNotionalUsd:n(process.env.SCAN_NOTIONAL_USD,1000,10),
   walDir:process.env.WAL_DIR||"./data",
   leaseSeconds:n(process.env.LEASE_SECONDS,60,10),
-  maxAttempts:n(process.env.MAX_ATTEMPTS,8,1)
+  maxAttempts:n(process.env.MAX_ATTEMPTS,8,1),meshSecret:process.env.MESH_SECRET||"",meshPeers:process.env.MESH_PEERS||""
 };
