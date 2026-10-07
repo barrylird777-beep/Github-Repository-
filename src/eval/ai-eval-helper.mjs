@@ -109,13 +109,23 @@ export class AiEvalHelper {
     const prompt = templates[template](clean);
 
     if (useModel) {
-      const generated = await callModel(prompt);
-      if (generated) {
+      try {
+        const generated = await callModel(prompt);
+        if (generated) {
         return {
           mode: "ai",
           type: template,
           prompt,
           result: generated
+        };
+        }
+      } catch (error) {
+        return {
+          mode: "template",
+          type: template,
+          prompt,
+          result: prompt,
+          providerError: String(error?.message || error)
         };
       }
     }
