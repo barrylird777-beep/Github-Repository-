@@ -1,0 +1,1 @@
+import test from "node:test";import assert from "node:assert/strict";import {normalizeEvent} from "../src/normalize/normalize.mjs";test("normalizes deterministic events",()=>{const a=normalizeEvent({source:"x",payload:{a:1}}),b=normalizeEvent({source:"x",payload:{a:1}});assert.equal(a.fingerprint,b.fingerprint);assert.equal(a.source,"x")});
