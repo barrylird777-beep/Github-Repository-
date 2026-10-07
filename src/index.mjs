@@ -37,7 +37,7 @@ const queue=pool?new PostgresQueue(pool,{leaseSeconds:config.leaseSeconds,maxAtt
 const scanner=new UniswapV3Scanner({rpcUrl:config.rpcUrl,chainId:config.chainId,notionalUsd:config.scanNotionalUsd});
 const sniper=new RawSniper({rpcUrl:config.rpcUrl,chainId:config.chainId});
 const bountyScanner=new BountyScanner({token:process.env.GITHUB_TOKEN||""});
-const mesh=process.env.MESH_SECRET?new PrivateMesh({secret:process.env.MESH_SECRET,maxLanes:8}):null;
+const mesh=process.env.MESH_SECRET?new PrivateMesh({secret:process.env.MESH_SECRET,maxLanes:8,peers:(()=>{try{return process.env.MESH_PEERS?JSON.parse(process.env.MESH_PEERS):[]}catch{return[]}})()}):null;
 let sniperState={status:"starting",events:0,lastBlock:0,error:null};
 let lastScan={status:"not_run",pools:0,opportunities:0,at:null,error:null};
 let stopping=false;
