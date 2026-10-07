@@ -1,0 +1,1 @@
+{"name":"opportunity-feed-intelligence","private":true,"version":"1.0.0","type":"module","engines":{"node":">=22"},"scripts":{"start":"node src/index.mjs","test":"node --test","check":"node --check src/index.mjs src/queue/postgres-queue.mjs src/ingest/feed-worker.mjs"},"dependencies":{"ethers":"^6.15.0","pg":"^8.16.3"}}
