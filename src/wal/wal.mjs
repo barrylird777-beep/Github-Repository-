@@ -1,0 +1,1 @@
+import fs from "node:fs/promises";import path from "node:path";export class Wal{constructor(dir){this.dir=dir;this.file=path.join(dir,"events.wal")}async init(){await fs.mkdir(this.dir,{recursive:true})}async append(event){await fs.appendFile(this.file,JSON.stringify(event)+"\\n","utf8")}}
