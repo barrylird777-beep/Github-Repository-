@@ -72,8 +72,8 @@ function liveOpportunityId(opportunity){
 }
 async function ingest(source,payload,sequence=null){
  const e=normalizeEvent({source,payload,sequence});
- const result=await persist("koin_kob_ingestion_events",e.fingerprint,{...e,id:e.fingerprint,status:"received",createdAt:e.observed_at,updatedAt:e.observed_at});
- return {...e,durable:result.durable,...(result.error?{storageError:result.error}:{})};
+ await wal.append({type:"ingestion-event",event:e});
+ return {...e,durable:false,storage:"local-wal-telemetry"};
 }
 async function sniff(){
  if(stopping)return;
