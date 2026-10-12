@@ -1,8 +1,8 @@
 import http from "node:http";
-import pg from "pg";
 import {config} from "./config.mjs";
 import {Wal} from "./wal/wal.mjs";
-import {PostgresQueue} from "./queue/postgres-queue.mjs";
+import {PureWalQueue} from "./queue/pure-wal-queue.mjs";
+import {RemotePureWalStore} from "./store/remote-pure-wal-store.mjs";
 import {normalizeEvent} from "./normalize/normalize.mjs";
 import {UniswapV3Scanner} from "./scanner/uniswap-v3.mjs";
 import {RawSniper} from "./scanner/raw-sniper.mjs";
@@ -11,37 +11,11 @@ import {BountyScanner} from "./bounty/bounty-scanner.mjs";
 import {handleInstantExtract} from "./api/instant-extract-route.mjs";
 import {AiEvalHelper} from "./eval/ai-eval-helper.mjs";
 
-const pool=/^postgres(?:ql)?:\/\//i.test(config.databaseUrl)
- ? new pg.Pool({connectionString:config.databaseUrl,max:10,idleTimeoutMillis:30000,connectionTimeoutMillis:10000})
- : null;
+const remoteStore=new RemotePureWalStore({baseUrl:config.apiUrl,token:config.opportunityToken});
 const wal=new Wal(config.walDir);await wal.init();
-if(!pool)console.warn("DATABASE_URL is not configured");
-if(pool)await pool.query(`
- CREATE TABLE IF NOT EXISTS ingestion_events(
-  id BIGSERIAL PRIMARY KEY,fingerprint TEXT NOT NULL UNIQUE,source TEXT NOT NULL,sequence BIGINT,
-  observed_at TIMESTAMPTZ NOT NULL DEFAULT now(),payload JSONB NOT NULL,
-  status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued','processing','processed','failed')),
-  attempts INTEGER NOT NULL DEFAULT 0,lease_token UUID,lease_until TIMESTAMPTZ,last_error TEXT,
-  next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
- ALTER TABLE ingestion_events ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now();
- CREATE INDEX IF NOT EXISTS ingestion_events_queue_idx ON ingestion_events(status,id);
- CREATE INDEX IF NOT EXISTS ingestion_events_lease_idx ON ingestion_events(status,lease_until);
- CREATE INDEX IF NOT EXISTS ingestion_events_ready_idx ON ingestion_events(status,next_attempt_at,id);
- CREATE TABLE IF NOT EXISTS ingestion_dead_letter(
-  id BIGSERIAL PRIMARY KEY,ingestion_id BIGINT NOT NULL UNIQUE REFERENCES ingestion_events(id) ON DELETE CASCADE,
-  fingerprint TEXT NOT NULL,source TEXT NOT NULL,sequence BIGINT,payload JSONB NOT NULL,
-  attempts INTEGER NOT NULL,last_error TEXT,failed_at TIMESTAMPTZ NOT NULL DEFAULT now());
- CREATE TABLE IF NOT EXISTS opportunities(
-  id BIGSERIAL PRIMARY KEY,fingerprint TEXT NOT NULL UNIQUE,kind TEXT NOT NULL,chain_id INTEGER,
-  token_in TEXT,token_out TEXT,buy_pool TEXT,sell_pool TEXT,gross_edge_bps NUMERIC NOT NULL,
-  estimated_gas_usd NUMERIC,estimated_slippage_usd NUMERIC,estimated_net_profit_usd NUMERIC,
-  observed_at TIMESTAMPTZ NOT NULL,payload JSONB NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT now());
- CREATE INDEX IF NOT EXISTS opportunities_rank_idx ON opportunities(estimated_net_profit_usd DESC NULLS LAST,observed_at DESC);
- CREATE TABLE IF NOT EXISTS engine_state(key TEXT PRIMARY KEY,value JSONB NOT NULL,updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
- CREATE TABLE IF NOT EXISTS raw_liquidity_events(id BIGSERIAL PRIMARY KEY,fingerprint TEXT NOT NULL UNIQUE,block_number BIGINT NOT NULL,transaction_hash TEXT NOT NULL,token0 TEXT NOT NULL,token1 TEXT NOT NULL,fee INTEGER NOT NULL,tick_spacing INTEGER NOT NULL,pool TEXT NOT NULL,observed_at TIMESTAMPTZ NOT NULL,payload JSONB NOT NULL);
-`);
-const queue=pool?new PostgresQueue(pool,{leaseSeconds:config.leaseSeconds,maxAttempts:config.maxAttempts}):null;
+const queue=new PureWalQueue(remoteStore,{leaseSeconds:config.leaseSeconds,maxAttempts:config.maxAttempts});
+await queue.recoverExpired();
+await wal.replay(async event=>{if(event?.fingerprint&&event?.source)await queue.enqueue(event)});
 const scanner=new UniswapV3Scanner({rpcUrl:config.rpcUrl,chainId:config.chainId,notionalUsd:config.scanNotionalUsd});
 const sniper=new RawSniper({rpcUrl:config.rpcUrl,chainId:config.chainId});
 const bountyScanner=new BountyScanner({token:process.env.GITHUB_TOKEN||""});
