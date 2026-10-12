@@ -35,26 +35,35 @@ let sniperState={status:"starting",events:0,lastBlock:0,error:null};
 let lastScan={status:"not_run",pools:0,opportunities:0,at:null,error:null};
 let stopping=false;
 
-async function persist(collection,id,record){
- const item={collection:String(collection),id:String(id),record};
+async function persistOpportunity(opportunity){
+ const id=String(opportunity.fingerprint||"");
+ if(!id)throw new Error("Opportunity fingerprint is required for sovereign persistence");
  try{
-  const saved=await store.put(item.collection,item.id,item.record);
-  pendingWrites.delete(pendingKey(item));
-  return {durable:true,record:saved};
+  await store.saveOpportunity(opportunity);
+  if(pendingWrites.has(id)){
+   await wal.append({type:"ack-opportunity",id,acknowledgedAt:new Date().toISOString()});
+   pendingWrites.delete(id);
+  }
+  return {durable:true};
  }catch(error){
-  await wal.append({type:"sovereign-store-write",...item,failedAt:new Date().toISOString()});
-  pendingWrites.set(pendingKey(item),item);
+  const item={id,opportunity};
+  await wal.append({type:"pending-opportunity",...item,failedAt:new Date().toISOString()});
+  pendingWrites.set(id,item);
   return {durable:false,error:String(error?.message||error).slice(0,300)};
  }
 }
 async function flushPendingWrites(){
  if(!pendingWrites.size||!store.configured)return;
- const batch=[...pendingWrites.values()].slice(0,50);
- try{
-  await store.bulk(batch);
-  for(const item of batch)pendingWrites.delete(pendingKey(item));
- }catch(error){
-  console.warn("sovereign outbox sync deferred",JSON.stringify({pending:pendingWrites.size,error:String(error?.message||error).slice(0,240)}));
+ const batch=[...pendingWrites.values()].slice(0,20);
+ for(const item of batch){
+  try{
+   await store.saveOpportunity(item.opportunity);
+   await wal.append({type:"ack-opportunity",id:item.id,acknowledgedAt:new Date().toISOString()});
+   pendingWrites.delete(item.id);
+  }catch(error){
+   console.warn("KashKorner opportunity outbox sync deferred",JSON.stringify({pending:pendingWrites.size,error:String(error?.message||error).slice(0,240)}));
+   break;
+  }
  }
 }
 function liveOpportunityId(opportunity){
