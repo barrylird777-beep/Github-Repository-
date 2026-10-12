@@ -6,15 +6,17 @@ services:
     region: ohio
     repo: https://github.com/barrylird777-beep/Github-Repository-
     branch: main
-    buildCommand: npm install --no-audit --no-fund
+    buildCommand: npm install --no-audit --no-fund && npm run check && npm test && npm prune --omit=dev
     startCommand: npm start
     autoDeploy: true
     healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
-        fromDatabase:
-          name: opportunity-engine-db
-          property: connectionString
+        sync: false
+      - key: APEX_WORKER_API_URL
+        value: https://apex-studio-production.up.railway.app
+      - key: APEX_OPPORTUNITY_ENGINE_TOKEN
+        sync: false
       - key: RPC_URL
         sync: false
       - key: CHAIN_ID
@@ -23,5 +25,3 @@ services:
         value: "1000"
       - key: WORKER_BATCH_SIZE
         value: "8"
-      - key: WAL_DIR
-        value: "./data"
