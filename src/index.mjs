@@ -91,13 +91,13 @@ async function scan(){
   const now=new Date().toISOString();
   let durableWrites=0,writeFailures=0;
   for(const opportunity of result.opportunities){
-   const id=liveOpportunityId(opportunity);
-   const record={...opportunity,id,source:"live",sourceFingerprint:opportunity.fingerprint,createdAt:now,updatedAt:now};
-   const saved=await persist("koin_kob_opportunities",id,record);
+   const fingerprint=liveOpportunityId(opportunity);
+   const record={...opportunity,fingerprint,sourceFingerprint:opportunity.fingerprint,source:"live",observed_at:now,observedAt:now};
+   const saved=await persistOpportunity(record);
    if(saved.durable)durableWrites++;else writeFailures++;
   }
   lastScan={status:writeFailures?"degraded":"ok",pools:result.pools,opportunities:result.opportunities.length,durableWrites,pendingLocalWrites:pendingWrites.size,rpcErrors:result.rpcErrors||[],diagnostics:result.diagnostics||null,at:now,error:writeFailures?writeFailures+" opportunity writes buffered locally":null};
-  await persist("koin_kob_engine_state","scanner",{key:"scanner",value:lastScan,updatedAt:now});
+  await wal.append({type:"scanner-state",value:lastScan});
   console.log("scan complete",JSON.stringify(lastScan));
  }catch(e){lastScan={...lastScan,status:"error",at:new Date().toISOString(),error:String(e?.message||e)};console.error("scanner",e)}
 }
