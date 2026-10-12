@@ -27,16 +27,14 @@ export async function migrateLegacyPostgresToPureWal({ remoteStore, databaseUrl,
     while (true) {
       const result = await pool.query(sql, [lastId, 250]);
       if (!result.rows.length) break;
-      for (const row of result.rows) {
+      const items = result.rows.map(row => {
         const id = String(row.fingerprint || '');
-        if (!id) continue;
-        const existing = await remoteStore.get(collection, id);
-        if (existing) {
-          counts.existingRecords += 1;
-          continue;
-        }
-        await remoteStore.put(collection, id, mapper(row, id));
-        counts[countKey] += 1;
+        return id ? { collection, id, record: mapper(row, id) } : null;
+      }).filter(Boolean);
+      for (let offset = 0; offset < items.length; offset += 100) {
+        const result = await remoteStore.putMany(items.slice(offset, offset + 100));
+        counts[countKey] += result.written;
+        counts.existingRecords += result.existing;
       }
       lastId = Number(result.rows[result.rows.length - 1].id);
     }
@@ -73,16 +71,14 @@ export async function migrateLegacyPostgresToPureWal({ remoteStore, databaseUrl,
     );
 
     const state = await pool.query('SELECT key,value,updated_at FROM engine_state ORDER BY key ASC');
-    for (const row of state.rows) {
+    const stateItems = state.rows.map(row => {
       const id = String(row.key);
-      if (await remoteStore.get('koin_kob_engine_state', id)) {
-        counts.existingRecords += 1;
-        continue;
-      }
-      await remoteStore.put('koin_kob_engine_state', id, {
-        id, key: id, value: row.value, updatedAt: iso(row.updated_at)
-      });
-      counts.engineState += 1;
+      return { collection: 'koin_kob_engine_state', id, record: { id, key: id, value: row.value, updatedAt: iso(row.updated_at) } };
+    });
+    for (let offset = 0; offset < stateItems.length; offset += 100) {
+      const result = await remoteStore.putMany(stateItems.slice(offset, offset + 100));
+      counts.engineState += result.written;
+      counts.existingRecords += result.existing;
     }
 
     await copyPaged(
