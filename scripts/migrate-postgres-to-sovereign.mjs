@@ -144,8 +144,13 @@ export async function migratePostgresToSovereign({
   pageSize = PAGE_SIZE,
   batchSize = BATCH_SIZE
 } = {}) {
-  if (!databaseUrl && !suppliedPool) throw new Error("DATABASE_URL is required only for the one-time legacy data copy");
   if (!store?.configured || typeof store.bulk !== "function") throw new Error("Sovereign Pure-WAL API URL and token must be configured before data migration");
+  const markerId = "legacy-postgres-migration-v1";
+  const existingMarker = await store.get("koin_kob_engine_state", markerId);
+  if (existingMarker?.value?.complete === true) {
+    return { ...existingMarker.value, alreadyComplete: true, databaseModified: false };
+  }
+  if (!databaseUrl && !suppliedPool) throw new Error("DATABASE_URL is required only for the one-time legacy data copy");
 
   const pool = suppliedPool || new Pool({
     connectionString: databaseUrl,
@@ -197,13 +202,17 @@ export async function migratePostgresToSovereign({
     if (ownsPool) await pool.end();
   }
 
-  return {
+  const result = {
     source: "legacy-postgres-read-only",
     target: "sovereign-pure-wal",
     databaseModified: false,
+    complete: true,
+    completedAt: new Date().toISOString(),
     tables: totals,
     rowsRead: Object.values(totals).reduce((sum, item) => sum + item.rows, 0),
     written: Object.values(totals).reduce((sum, item) => sum + item.written, 0),
     existing: Object.values(totals).reduce((sum, item) => sum + item.existing, 0)
   };
+  await store.put("koin_kob_engine_state", markerId, { key: markerId, value: result, updatedAt: result.completedAt });
+  return result;
 }
