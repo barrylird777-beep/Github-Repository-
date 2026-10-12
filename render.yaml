@@ -23,5 +23,3 @@ services:
         value: "1000"
       - key: WORKER_BATCH_SIZE
         value: "8"
-      - key: WAL_DIR
-        value: "./data"
