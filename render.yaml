@@ -11,10 +11,10 @@ services:
     autoDeploy: true
     healthCheckPath: /health
     envVars:
-      - key: DATABASE_URL
-        fromDatabase:
-          name: opportunity-engine-db
-          property: connectionString
+      - key: APEX_SOVEREIGN_API_URL
+        value: "https://apex-studio-production.up.railway.app"
+      - key: APEX_OPPORTUNITY_ENGINE_TOKEN
+        sync: false
       - key: RPC_URL
         sync: false
       - key: CHAIN_ID

@@ -1,7 +1,8 @@
 const n=(v,d,min=0)=>{const x=Number(v);return Number.isFinite(x)&&x>=min?x:d};
 export const config={
   port:n(process.env.PORT,10000,1),
-  databaseUrl:process.env.DATABASE_URL||"",
+  sovereignApiUrl:process.env.APEX_SOVEREIGN_API_URL||"https://apex-studio-production.up.railway.app",
+  opportunityEngineToken:process.env.APEX_OPPORTUNITY_ENGINE_TOKEN||"",
   rpcUrl:process.env.RPC_URL||"https://ethereum-rpc.publicnode.com",
   chainId:n(process.env.CHAIN_ID,1,1),
   pollMs:n(process.env.POLL_MS,15000,250),
