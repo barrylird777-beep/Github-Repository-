@@ -3,59 +3,46 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { SovereignApiStore } from "../src/queue/sovereign-api-store.mjs";
 
-test("SovereignApiStore sends authenticated Pure-WAL writes", async () => {
+test("SovereignApiStore sends authenticated opportunity writes to KashKorner", async () => {
   let request;
   const store = new SovereignApiStore({
     baseUrl: "https://apex.example/",
     token: "test-token",
     fetchImpl: async (url, options) => {
       request = { url, options };
-      return { ok: true, status: 200, json: async () => ({ success: true, record: { id: "op-1" } }) };
+      return { ok: true, status: 202, json: async () => ({ success: true, id: "op-1" }) };
     }
   });
 
-  const record = await store.put("koin_kob_opportunities", "op-1", { kind: "test" });
-  assert.deepEqual(record, { id: "op-1" });
-  assert.equal(request.url, "https://apex.example/api/internal/opportunity-engine/store/put");
+  const opportunity = { fingerprint: "stable-fingerprint", estimated_net_profit_usd: 3.2 };
+  const result = await store.saveOpportunity(opportunity);
+  assert.equal(result.success, true);
+  assert.equal(request.url, "https://apex.example/api/kash-korner/opportunities");
   assert.equal(request.options.method, "POST");
   assert.equal(request.options.headers["x-apex-opportunity-token"], "test-token");
-  assert.deepEqual(JSON.parse(request.options.body), {
-    collection: "koin_kob_opportunities",
-    id: "op-1",
-    record: { kind: "test" }
-  });
+  assert.deepEqual(JSON.parse(request.options.body), { opportunity });
 });
 
-test("SovereignApiStore preserves allowlisted query parameters", async () => {
-  let body;
+test("SovereignApiStore reads the public KashKorner opportunity feed", async () => {
+  let request;
   const store = new SovereignApiStore({
     baseUrl: "https://apex.example",
     token: "test-token",
-    fetchImpl: async (_url, options) => {
-      body = JSON.parse(options.body);
-      return { ok: true, status: 200, json: async () => ({ success: true, records: [{ id: "op-1" }] }) };
+    fetchImpl: async (url, options) => {
+      request = { url, options };
+      return { ok: true, status: 200, json: async () => ({ success: true, items: [{ id: "op-1" }] }) };
     }
   });
 
-  const records = await store.query("koin_kob_opportunities", {
-    filters: { source: "live" },
-    sortField: "estimated_net_profit_usd",
-    descending: true,
-    limit: 100
-  });
-  assert.deepEqual(records, [{ id: "op-1" }]);
-  assert.deepEqual(body, {
-    collection: "koin_kob_opportunities",
-    filters: { source: "live" },
-    sortField: "estimated_net_profit_usd",
-    descending: true,
-    limit: 100
-  });
+  const items = await store.listOpportunities(17);
+  assert.deepEqual(items, [{ id: "op-1" }]);
+  assert.equal(request.url, "https://apex.example/api/kash-korner/opportunities?limit=17");
+  assert.equal(request.options.method, "GET");
 });
 
-test("SovereignApiStore fails closed when credentials are missing or rejected", async () => {
-  const missing = new SovereignApiStore({ baseUrl: "", token: "" });
-  await assert.rejects(missing.get("koin_kob_opportunities", "op-1"), /not configured/);
+test("SovereignApiStore fails closed when write credentials are missing or rejected", async () => {
+  const missing = new SovereignApiStore({ baseUrl: "https://apex.example", token: "" });
+  await assert.rejects(missing.saveOpportunity({ fingerprint: "op-1" }), /credentials are not configured/);
 
   const unauthorized = new SovereignApiStore({
     baseUrl: "https://apex.example",
@@ -67,19 +54,13 @@ test("SovereignApiStore fails closed when credentials are missing or rejected", 
       json: async () => ({ success: false, error: "Unauthorized" })
     })
   });
-  await assert.rejects(unauthorized.get("koin_kob_opportunities", "op-1"), /failed \(401\)/);
-});
-
-test("SovereignApiStore limits bulk batches to the API contract", async () => {
-  const store = new SovereignApiStore({ baseUrl: "https://apex.example", token: "test-token" });
-  await assert.rejects(store.bulk([]), /1–100 records/);
-  await assert.rejects(store.bulk(Array.from({ length: 101 }, (_, index) => ({ collection: "koin_kob_opportunities", id: String(index), record: {} }))), /1–100 records/);
+  await assert.rejects(unauthorized.saveOpportunity({ fingerprint: "op-1" }), /failed \(401\)/);
 });
 
 test("active Opportunity Engine runtime has no PostgreSQL queue path", async () => {
   const source = await readFile(new URL("../src/index.mjs", import.meta.url), "utf8");
-  assert.doesNotMatch(source, /import\\s+pg\\s+from/);
-  assert.doesNotMatch(source, /PostgresQueue|new\\s+pg\\.Pool|postgres:Boolean\\(pool\\)/i);
+  assert.doesNotMatch(source, /import\s+pg\s+from/);
+  assert.doesNotMatch(source, /PostgresQueue|new\s+pg\.Pool|postgres:Boolean\(pool\)/i);
   assert.match(source, /SovereignApiStore/);
-  assert.match(source, /koin_kob_opportunities/);
+  assert.match(source, /store\.saveOpportunity/);
 });
