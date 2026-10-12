@@ -15,74 +15,58 @@ export class SovereignApiStore {
     return Boolean(this.baseUrl && this.token && typeof this.fetchImpl === "function");
   }
 
-  async request(action, payload = {}) {
-    if (!this.configured) {
-      throw new Error("Sovereign Pure-WAL store is not configured; set APEX_OPPORTUNITY_ENGINE_API_URL and APEX_OPPORTUNITY_ENGINE_TOKEN");
+  async request(url, { method = "GET", body, authenticate = false } = {}) {
+    if (!this.baseUrl || typeof this.fetchImpl !== "function") {
+      throw new Error("KashKorner Pure-WAL API URL is not configured");
     }
-    const response = await this.fetchImpl(
-      this.baseUrl + "/api/internal/opportunity-engine/store/" + action,
-      {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-apex-opportunity-token": this.token
-        },
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(this.timeoutMs)
-      }
-    );
+    if (authenticate && !this.token) {
+      throw new Error("APEX_OPPORTUNITY_ENGINE_TOKEN is required for durable opportunity writes");
+    }
+    const headers = { accept: "application/json", "cache-control": "no-store" };
+    if (body !== undefined) headers["content-type"] = "application/json";
+    if (authenticate) headers["x-apex-opportunity-token"] = this.token;
+    const response = await this.fetchImpl(this.baseUrl + url, {
+      method,
+      headers,
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      signal: AbortSignal.timeout(this.timeoutMs)
+    });
     let result;
     try {
       result = await response.json();
     } catch {
-      throw new Error("Sovereign Pure-WAL store returned invalid JSON (" + response.status + ")");
+      throw new Error("KashKorner Pure-WAL API returned invalid JSON (" + response.status + ")");
     }
     if (!response.ok || result?.success !== true) {
       const detail = String(result?.error || response.statusText || "request failed").slice(0, 300);
-      throw new Error("Sovereign Pure-WAL store " + action + " failed (" + response.status + "): " + detail);
+      throw new Error("KashKorner Pure-WAL API failed (" + response.status + "): " + detail);
     }
     return result;
   }
 
-  async get(collection, id) {
-    const result = await this.request("get", { collection, id });
-    return result.record ?? null;
-  }
-
-  async query(collection, {
-    filters = {},
-    sortField = "",
-    descending = false,
-    limit = 100
-  } = {}) {
-    const result = await this.request("query", {
-      collection,
-      filters,
-      sortField,
-      descending,
-      limit: Math.max(1, Math.min(500, Math.floor(Number(limit) || 100)))
-    });
-    return Array.isArray(result.records) ? result.records : [];
-  }
-
-  async put(collection, id, record) {
-    const result = await this.request("put", { collection, id, record });
-    return result.record;
-  }
-
-  async bulk(items) {
-    if (!Array.isArray(items) || items.length < 1 || items.length > 100) {
-      throw new TypeError("Sovereign Pure-WAL bulk writes require 1–100 records");
+  async saveOpportunity(opportunity) {
+    if (!this.configured) {
+      throw new Error("KashKorner Pure-WAL API credentials are not configured");
     }
-    return this.request("bulk", { items });
+    return this.request("/api/kash-korner/opportunities", {
+      method: "POST",
+      body: { opportunity },
+      authenticate: true
+    });
+  }
+
+  async listOpportunities(limit = 100) {
+    const bounded = Math.max(1, Math.min(500, Math.floor(Number(limit) || 100)));
+    const result = await this.request("/api/kash-korner/opportunities?limit=" + bounded);
+    return Array.isArray(result.items) ? result.items : [];
   }
 
   async health() {
     if (!this.configured) {
-      return { configured: false, ok: false, error: "Sovereign store token or API URL is missing" };
+      return { configured: false, ok: false, error: "Opportunity API URL or token is missing" };
     }
     try {
-      await this.get("koin_kob_engine_state", "scanner");
+      await this.listOpportunities(1);
       return { configured: true, ok: true };
     } catch (error) {
       return { configured: true, ok: false, error: String(error?.message || error).slice(0, 300) };
