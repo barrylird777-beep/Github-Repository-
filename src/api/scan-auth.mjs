@@ -1,6 +1,11 @@
 import { timingSafeEqual } from "node:crypto";
 
-export function authorizeScanRequest(req, token = process.env.OPPORTUNITY_SCAN_TOKEN) {
+export function authorizeScanRequest(
+  req,
+  token = process.env.APEX_OPPORTUNITY_ENGINE_TOKEN ||
+    process.env.APEX_OPPORTUNITY_ENGINE_SYNC_TOKEN ||
+    process.env.OPPORTUNITY_SCAN_TOKEN
+) {
   const expected = String(token || "").trim();
   const header = String(req?.headers?.authorization || "");
   const match = /^Bearer\s+(.+)$/i.exec(header);
