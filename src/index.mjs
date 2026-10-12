@@ -1,6 +1,5 @@
 import http from "node:http";
 import {config} from "./config.mjs";
-import {Wal} from "./wal/wal.mjs";
 import {normalizeEvent} from "./normalize/normalize.mjs";
 import {UniswapV3Scanner} from "./scanner/uniswap-v3.mjs";
 import {RawSniper} from "./scanner/raw-sniper.mjs";
@@ -10,8 +9,7 @@ import {handleInstantExtract} from "./api/instant-extract-route.mjs";
 import {AiEvalHelper} from "./eval/ai-eval-helper.mjs";
 import { authorizeScanRequest } from "./api/scan-auth.mjs";
 
-const wal=new Wal(config.walDir);await wal.init();
-const opportunities=new Map(),ingestionEvents=new Map(),rawLiquidityEvents=new Map(),persistedAt=new Map(),remoteSyncedAt=new Map();
+const opportunities=new Map(),ingestionEvents=new Map(),rawLiquidityEvents=new Map(),remoteSyncedAt=new Map();
 const apiBase=String(process.env.APEX_SOVEREIGN_API_URL||"").trim().replace(/\/+$/,"");
 const apiToken=String(process.env.APEX_OPPORTUNITY_ENGINE_TOKEN||"").trim();
 let remoteStoreState={configured:Boolean(apiBase&&apiToken),status:apiBase&&apiToken?"pending":"not-configured",lastSyncAt:null,error:null};
@@ -19,15 +17,6 @@ let lastSniperBlock=0;
 let sniperState={status:"starting",events:0,lastBlock:0,error:null};
 let lastScan={status:"not_run",pools:0,opportunities:0,at:null,error:null};
 let stopping=false;
-function restoreRecord(r){
- if(r?.type==="opportunity"&&r.opportunity?.fingerprint){opportunities.set(String(r.opportunity.fingerprint),r.opportunity);persistedAt.set(String(r.opportunity.fingerprint),Date.parse(r.savedAt||r.opportunity.observed_at||0)||0);}
- else if(r?.type==="ingestion"&&r.event?.fingerprint)ingestionEvents.set(String(r.event.fingerprint),r.event);
- else if(r?.type==="raw-liquidity"&&r.event?.fingerprint)rawLiquidityEvents.set(String(r.event.fingerprint),r.event);
- else if(r?.type==="raw-sniper-cursor")lastSniperBlock=Math.max(lastSniperBlock,Number(r.lastBlock)||0);
- else if(r?.type==="scanner-state"&&r.state)lastScan=r.state;
- else if(r?.fingerprint&&r?.source)ingestionEvents.set(String(r.fingerprint),r);
-}
-await wal.replay(restoreRecord);
 async function postOpportunityToSovereignApi(o){
  if(!apiBase||!apiToken)return false;
  const response=await fetch(apiBase+"/api/kash-korner/opportunities",{method:"POST",headers:{"content-type":"application/json","x-apex-opportunity-token":apiToken,authorization:"Bearer "+apiToken},body:JSON.stringify(o),signal:AbortSignal.timeout(8000)});
@@ -55,20 +44,37 @@ async function opportunityFeed(){
    if(!response.ok)throw new Error("Sovereign opportunity feed HTTP "+response.status);
    const data=await response.json();
    remoteStoreState={configured:true,status:"connected",lastSyncAt:remoteStoreState.lastSyncAt,error:null};
-   return {items:Array.isArray(data.items)?data.items:[],storage:"railway-pure-wal",source:"sovereign-api"};
+   return {items:Array.isArray(data.items)?data.items:[],storage:"sovereign-remote-cas",source:"sovereign-api"};
   }catch(e){remoteStoreState={configured:true,status:"degraded",lastSyncAt:remoteStoreState.lastSyncAt,error:String(e?.message||e).slice(0,300)};}
  }
- return {items:[...opportunities.values()].sort((a,b)=>Number(b.estimated_net_profit_usd||0)-Number(a.estimated_net_profit_usd||0)||String(b.observed_at||"").localeCompare(String(a.observed_at||""))).slice(0,100),storage:"local-pure-wal",source:"local-fallback",warning:remoteStoreState.error||(!remoteStoreState.configured?"Sovereign API sync is not configured":null)};
+ return {items:[...opportunities.values()].sort((a,b)=>Number(b.estimated_net_profit_usd||0)-Number(a.estimated_net_profit_usd||0)||String(b.observed_at||"").localeCompare(String(a.observed_at||""))).slice(0,100),storage:"memory-only",source:"memory-fallback",warning:remoteStoreState.error||(!remoteStoreState.configured?"Sovereign API sync is not configured; results are not durable":null)};
+}
+async function hydrateRemoteOpportunities(){
+ if(!apiBase||!apiToken)return;
+ try{
+  const feed=await opportunityFeed();
+  for(const item of feed.items||[]){
+   const fp=String(item?.fingerprint||"").trim();
+   if(!fp)continue;
+   opportunities.set(fp,item);
+   remoteSyncedAt.set(fp,Date.now());
+  }
+  console.log("remote opportunity feed hydrated",JSON.stringify({items:opportunities.size,storage:"sovereign-remote-cas"}));
+ }catch(error){
+  remoteStoreState={configured:true,status:"degraded",lastSyncAt:remoteStoreState.lastSyncAt,error:String(error?.message||error).slice(0,300)};
+  console.error("remote opportunity hydration",remoteStoreState.error);
+ }
 }
 const scanner=new UniswapV3Scanner({rpcUrl:config.rpcUrl,chainId:config.chainId,notionalUsd:config.scanNotionalUsd});
 const sniper=new RawSniper({rpcUrl:config.rpcUrl,chainId:config.chainId});
 sniper.lastBlock=lastSniperBlock;
 const bountyScanner=new BountyScanner({token:process.env.GITHUB_TOKEN||""});
 const evalHelper=new AiEvalHelper();
+await hydrateRemoteOpportunities();
 const mesh=process.env.MESH_SECRET?new PrivateMesh({secret:process.env.MESH_SECRET,maxLanes:8,peers:(()=>{try{return process.env.MESH_PEERS?JSON.parse(process.env.MESH_PEERS):[]}catch{return[]}})()}):null;
-async function ingest(source,payload,sequence=null){const event=normalizeEvent({source,payload,sequence});await wal.append({type:"ingestion",event});ingestionEvents.set(String(event.fingerprint),event);return event;}
-async function sniff(){if(stopping)return;try{await sniper.start();const events=await sniper.poll();for(const event of events){if(!rawLiquidityEvents.has(String(event.fingerprint))){await wal.append({type:"raw-liquidity",event});rawLiquidityEvents.set(String(event.fingerprint),event);}}if(sniper.lastBlock>lastSniperBlock){lastSniperBlock=sniper.lastBlock;await wal.append({type:"raw-sniper-cursor",lastBlock:lastSniperBlock,savedAt:new Date().toISOString()});}sniperState={status:"ok",events:rawLiquidityEvents.size,lastBlock:sniper.lastBlock,error:null};}catch(e){sniperState={...sniperState,status:"error",error:String(e?.message||e)};}}
-async function scan(){if(stopping)return;try{const result=await scanner.scan();for(const opportunity of result.opportunities)await saveOpportunity(opportunity);lastScan={status:"ok",pools:result.pools,opportunities:result.opportunities.length,rpcErrors:result.rpcErrors||[],diagnostics:result.diagnostics||null,at:new Date().toISOString(),error:null};await wal.append({type:"scanner-state",state:lastScan});console.log("scan complete",JSON.stringify({...lastScan,storage:"pure-wal",remoteStore:remoteStoreState.status}));}catch(e){lastScan={...lastScan,status:"error",at:new Date().toISOString(),error:String(e?.message||e)};await wal.append({type:"scanner-state",state:lastScan}).catch(()=>{});console.error("scanner",e);}}
+async function ingest(source,payload,sequence=null){const event=normalizeEvent({source,payload,sequence});ingestionEvents.set(String(event.fingerprint),event);return event;}
+async function sniff(){if(stopping)return;try{await sniper.start();const events=await sniper.poll();for(const event of events){if(!rawLiquidityEvents.has(String(event.fingerprint))){rawLiquidityEvents.set(String(event.fingerprint),event);}}if(sniper.lastBlock>lastSniperBlock){lastSniperBlock=sniper.lastBlock;}sniperState={status:"ok",events:rawLiquidityEvents.size,lastBlock:sniper.lastBlock,error:null};}catch(e){sniperState={...sniperState,status:"error",error:String(e?.message||e)};}}
+async function scan(){if(stopping)return;try{const result=await scanner.scan();for(const opportunity of result.opportunities)await saveOpportunity(opportunity);lastScan={status:"ok",pools:result.pools,opportunities:result.opportunities.length,rpcErrors:result.rpcErrors||[],diagnostics:result.diagnostics||null,at:new Date().toISOString(),error:null};console.log("scan complete",JSON.stringify({...lastScan,storage:apiBase&&apiToken?"sovereign-remote-cas":"memory-only",remoteStore:remoteStoreState.status}));}catch(e){lastScan={...lastScan,status:"error",at:new Date().toISOString(),error:String(e?.message||e)};console.error("scanner",e);}}
 
 const css=`:root{color-scheme:dark;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#080b12;color:#eef2ff}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 20% 0,#16213b 0,#080b12 42%);min-height:100vh}header{padding:28px 5vw 18px;border-bottom:1px solid #20283a;background:#0b0f18dd;backdrop-filter:blur(12px);position:sticky;top:0;z-index:2}.brand{font-size:26px;font-weight:800}.sub{color:#8d98ad;margin-top:5px}main{width:min(1180px,92vw);margin:30px auto 70px}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.card{background:#101522;border:1px solid #222c40;border-radius:16px;padding:20px}.label{font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#7e8aa1}.value{font-size:25px;font-weight:750;margin-top:9px}.ok{color:#6ee7a1}.warn{color:#ffd166}.muted{color:#8d98ad}.section{margin-top:22px}.section h2{font-size:18px}.toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}button{border:1px solid #35415b;background:#171f30;color:#eef2ff;border-radius:10px;padding:10px 14px;font-weight:650}.table{overflow:auto;border:1px solid #222c40;border-radius:14px;background:#0e131e}table{width:100%;border-collapse:collapse;min-width:820px}th,td{text-align:left;padding:13px;border-bottom:1px solid #20283a}th{font-size:11px;color:#7e8aa1;text-transform:uppercase}td{font-size:14px}.empty{padding:45px;text-align:center;color:#7e8aa1}.pill{display:inline-block;padding:5px 9px;border-radius:999px;background:#182a25;color:#79e2a7;font-size:12px;font-weight:700}@media(max-width:800px){.grid{grid-template-columns:repeat(2,1fr)}}`;
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
