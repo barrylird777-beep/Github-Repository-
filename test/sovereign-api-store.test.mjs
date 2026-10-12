@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { SovereignApiStore } from "../src/queue/sovereign-api-store.mjs";
 
 test("SovereignApiStore sends authenticated Pure-WAL writes", async () => {
@@ -73,4 +74,12 @@ test("SovereignApiStore limits bulk batches to the API contract", async () => {
   const store = new SovereignApiStore({ baseUrl: "https://apex.example", token: "test-token" });
   await assert.rejects(store.bulk([]), /1–100 records/);
   await assert.rejects(store.bulk(Array.from({ length: 101 }, (_, index) => ({ collection: "koin_kob_opportunities", id: String(index), record: {} }))), /1–100 records/);
+});
+
+test("active Opportunity Engine runtime has no PostgreSQL queue path", async () => {
+  const source = await readFile(new URL("../src/index.mjs", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /import\\s+pg\\s+from/);
+  assert.doesNotMatch(source, /PostgresQueue|new\\s+pg\\.Pool|postgres:Boolean\\(pool\\)/i);
+  assert.match(source, /SovereignApiStore/);
+  assert.match(source, /koin_kob_opportunities/);
 });
