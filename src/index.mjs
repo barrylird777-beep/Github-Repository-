@@ -80,12 +80,8 @@ async function sniff(){
  try{
   await sniper.start();
   const events=await sniper.poll();
-  let writeFailures=0;
-  for(const e of events){
-   const saved=await persist("koin_kob_raw_liquidity_events",e.fingerprint,{...e,id:e.fingerprint,source:"live",observed_at:e.observedAt,createdAt:e.observedAt});
-   if(!saved.durable)writeFailures++;
-  }
-  sniperState={status:writeFailures?"degraded":"ok",events:sniperState.events+events.length,lastBlock:sniper.lastBlock,error:writeFailures?writeFailures+" event writes buffered locally":null};
+  for(const event of events)await wal.append({type:"raw-liquidity-event",event});
+  sniperState={status:"ok",events:sniperState.events+events.length,lastBlock:sniper.lastBlock,storage:"local-wal-telemetry",error:null};
  }catch(e){sniperState={...sniperState,status:"error",error:String(e?.message||e)}}
 }
 async function scan(){
