@@ -21,3 +21,7 @@ services:
         value: "8"
       - key: WAL_DIR
         value: "./data"
+      - key: APEX_SOVEREIGN_API_URL
+        value: "https://apex-studio-production.up.railway.app"
+      - key: APEX_OPPORTUNITY_ENGINE_TOKEN
+        sync: false
