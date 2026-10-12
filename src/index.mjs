@@ -13,7 +13,7 @@ import {AiEvalHelper} from "./eval/ai-eval-helper.mjs";
 
 const remoteStore=new RemotePureWalStore({baseUrl:config.apiUrl,token:config.opportunityToken});
 
-await migrateLegacyPostgresToPureWal();
+await migrateLegacyPostgresToPureWal({remoteStore,databaseUrl:config.databaseUrl});
 const queue=new PureWalQueue(remoteStore,{leaseSeconds:config.leaseSeconds,maxAttempts:config.maxAttempts});
 await queue.recoverExpired();
 const queue=new PureWalQueue(remoteStore,{leaseSeconds:config.leaseSeconds,maxAttempts:config.maxAttempts});
