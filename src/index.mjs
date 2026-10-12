@@ -1,6 +1,5 @@
 import http from "node:http";
 import {config} from "./config.mjs";
-import {Wal} from "./wal/wal.mjs";
 import {PureWalQueue} from "./queue/pure-wal-queue.mjs";
 import {RemotePureWalStore} from "./store/remote-pure-wal-store.mjs";
 import {normalizeEvent} from "./normalize/normalize.mjs";
@@ -12,10 +11,8 @@ import {handleInstantExtract} from "./api/instant-extract-route.mjs";
 import {AiEvalHelper} from "./eval/ai-eval-helper.mjs";
 
 const remoteStore=new RemotePureWalStore({baseUrl:config.apiUrl,token:config.opportunityToken});
-const wal=new Wal(config.walDir);await wal.init();
 const queue=new PureWalQueue(remoteStore,{leaseSeconds:config.leaseSeconds,maxAttempts:config.maxAttempts});
 await queue.recoverExpired();
-await wal.replay(async event=>{if(event?.fingerprint&&event?.source)await queue.enqueue(event)});
 const scanner=new UniswapV3Scanner({rpcUrl:config.rpcUrl,chainId:config.chainId,notionalUsd:config.scanNotionalUsd});
 const sniper=new RawSniper({rpcUrl:config.rpcUrl,chainId:config.chainId});
 const bountyScanner=new BountyScanner({token:process.env.GITHUB_TOKEN||""});
@@ -25,7 +22,7 @@ let sniperState={status:"starting",events:0,lastBlock:0,error:null};
 let lastScan={status:"not_run",pools:0,opportunities:0,at:null,error:null};
 let stopping=false;
 
-async function ingest(source,payload,sequence=null){const e=normalizeEvent({source,payload,sequence});await queue.enqueue(e);await wal.append(e);return e}
+async function ingest(source,payload,sequence=null){const e=normalizeEvent({source,payload,sequence});await queue.enqueue(e);return e}
 async function work(){
  if(!queue)return;
  await queue.recoverExpired();
