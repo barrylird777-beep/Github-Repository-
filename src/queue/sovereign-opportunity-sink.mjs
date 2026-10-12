@@ -1,3 +1,19 @@
+function opportunitySignature(value) {
+  return JSON.stringify({
+    fingerprint: value?.fingerprint,
+    kind: value?.kind,
+    chain_id: value?.chain_id,
+    token_in: value?.token_in,
+    token_out: value?.token_out,
+    buy_pool: value?.buy_pool,
+    sell_pool: value?.sell_pool,
+    gross_edge_bps: value?.gross_edge_bps,
+    estimated_gas_usd: value?.estimated_gas_usd,
+    estimated_slippage_usd: value?.estimated_slippage_usd,
+    estimated_net_profit_usd: value?.estimated_net_profit_usd
+  });
+}
+
 export class SovereignOpportunitySink {
   constructor({ wal, apiUrl = "", token = "" } = {}) {
     if (!wal) throw new TypeError("wal is required");
@@ -48,7 +64,7 @@ export class SovereignOpportunitySink {
     };
     const prior = this.pending.get(fingerprint);
     const sent = this.lastSent.get(fingerprint);
-    if (prior && JSON.stringify(prior) === JSON.stringify(value)) {
+    if (prior && opportunitySignature(prior) === opportunitySignature(value)) {
       await this.flushPending();
       return { durable: true, queued: this.pending.has(fingerprint), duplicate: true };
     }
