@@ -1,8 +1,8 @@
 import http from "node:http";
-import pg from "pg";
 import {config} from "./config.mjs";
 import {Wal} from "./wal/wal.mjs";
-import {PostgresQueue} from "./queue/postgres-queue.mjs";
+import {SovereignApiStore} from "./queue/sovereign-api-store.mjs";
+import crypto from "node:crypto";
 import {normalizeEvent} from "./normalize/normalize.mjs";
 import {UniswapV3Scanner} from "./scanner/uniswap-v3.mjs";
 import {RawSniper} from "./scanner/raw-sniper.mjs";
@@ -11,37 +11,20 @@ import {BountyScanner} from "./bounty/bounty-scanner.mjs";
 import {handleInstantExtract} from "./api/instant-extract-route.mjs";
 import {AiEvalHelper} from "./eval/ai-eval-helper.mjs";
 
-const pool=/^postgres(?:ql)?:\/\//i.test(config.databaseUrl)
- ? new pg.Pool({connectionString:config.databaseUrl,max:10,idleTimeoutMillis:30000,connectionTimeoutMillis:10000})
- : null;
 const wal=new Wal(config.walDir);await wal.init();
-if(!pool)console.warn("DATABASE_URL is not configured");
-if(pool)await pool.query(`
- CREATE TABLE IF NOT EXISTS ingestion_events(
-  id BIGSERIAL PRIMARY KEY,fingerprint TEXT NOT NULL UNIQUE,source TEXT NOT NULL,sequence BIGINT,
-  observed_at TIMESTAMPTZ NOT NULL DEFAULT now(),payload JSONB NOT NULL,
-  status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued','processing','processed','failed')),
-  attempts INTEGER NOT NULL DEFAULT 0,lease_token UUID,lease_until TIMESTAMPTZ,last_error TEXT,
-  next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
- ALTER TABLE ingestion_events ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now();
- CREATE INDEX IF NOT EXISTS ingestion_events_queue_idx ON ingestion_events(status,id);
- CREATE INDEX IF NOT EXISTS ingestion_events_lease_idx ON ingestion_events(status,lease_until);
- CREATE INDEX IF NOT EXISTS ingestion_events_ready_idx ON ingestion_events(status,next_attempt_at,id);
- CREATE TABLE IF NOT EXISTS ingestion_dead_letter(
-  id BIGSERIAL PRIMARY KEY,ingestion_id BIGINT NOT NULL UNIQUE REFERENCES ingestion_events(id) ON DELETE CASCADE,
-  fingerprint TEXT NOT NULL,source TEXT NOT NULL,sequence BIGINT,payload JSONB NOT NULL,
-  attempts INTEGER NOT NULL,last_error TEXT,failed_at TIMESTAMPTZ NOT NULL DEFAULT now());
- CREATE TABLE IF NOT EXISTS opportunities(
-  id BIGSERIAL PRIMARY KEY,fingerprint TEXT NOT NULL UNIQUE,kind TEXT NOT NULL,chain_id INTEGER,
-  token_in TEXT,token_out TEXT,buy_pool TEXT,sell_pool TEXT,gross_edge_bps NUMERIC NOT NULL,
-  estimated_gas_usd NUMERIC,estimated_slippage_usd NUMERIC,estimated_net_profit_usd NUMERIC,
-  observed_at TIMESTAMPTZ NOT NULL,payload JSONB NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT now());
- CREATE INDEX IF NOT EXISTS opportunities_rank_idx ON opportunities(estimated_net_profit_usd DESC NULLS LAST,observed_at DESC);
- CREATE TABLE IF NOT EXISTS engine_state(key TEXT PRIMARY KEY,value JSONB NOT NULL,updated_at TIMESTAMPTZ NOT NULL DEFAULT now());
- CREATE TABLE IF NOT EXISTS raw_liquidity_events(id BIGSERIAL PRIMARY KEY,fingerprint TEXT NOT NULL UNIQUE,block_number BIGINT NOT NULL,transaction_hash TEXT NOT NULL,token0 TEXT NOT NULL,token1 TEXT NOT NULL,fee INTEGER NOT NULL,tick_spacing INTEGER NOT NULL,pool TEXT NOT NULL,observed_at TIMESTAMPTZ NOT NULL,payload JSONB NOT NULL);
-`);
-const queue=pool?new PostgresQueue(pool,{leaseSeconds:config.leaseSeconds,maxAttempts:config.maxAttempts}):null;
+const store=new SovereignApiStore({baseUrl:config.apexApiUrl,token:config.opportunityToken});
+const pendingWrites=new Map();
+const pendingKey=item=>String(item.collection)+":"+String(item.id);
+await wal.replay(async event=>{
+ if(event?.type==="sovereign-store-write"&&typeof event.collection==="string"&&typeof event.id==="string"&&event.record&&typeof event.record==="object"){
+  pendingWrites.set(pendingKey(event),{collection:event.collection,id:event.id,record:event.record});
+ }
+});
+if(String(process.env.MIGRATE_POSTGRES_TO_SOVEREIGN||"").toLowerCase()==="true"){
+ const {migratePostgresToSovereign}=await import("../scripts/migrate-postgres-to-sovereign.mjs");
+ const migrated=await migratePostgresToSovereign({databaseUrl:config.legacyMigrationDatabaseUrl,store});
+ console.log("legacy opportunity data copied into sovereign Pure-WAL",JSON.stringify(migrated));
+}
 const scanner=new UniswapV3Scanner({rpcUrl:config.rpcUrl,chainId:config.chainId,notionalUsd:config.scanNotionalUsd});
 const sniper=new RawSniper({rpcUrl:config.rpcUrl,chainId:config.chainId});
 const bountyScanner=new BountyScanner({token:process.env.GITHUB_TOKEN||""});
@@ -51,23 +34,65 @@ let sniperState={status:"starting",events:0,lastBlock:0,error:null};
 let lastScan={status:"not_run",pools:0,opportunities:0,at:null,error:null};
 let stopping=false;
 
-async function ingest(source,payload,sequence=null){const e=normalizeEvent({source,payload,sequence});await wal.append(e);if(queue)await queue.enqueue(e);return e}
-async function work(){
- if(!queue)return;
- await queue.recoverExpired();
- for(const job of await queue.claim(config.workerBatchSize)){
-  try{if(job.payload?.opportunity)await queue.saveOpportunity(job.payload.opportunity,job.observed_at);await queue.process(job,async()=>{})}
-  catch(e){await queue.fail(job,e);console.error("job",e)}
+async function persist(collection,id,record){
+ const item={collection:String(collection),id:String(id),record};
+ try{
+  const saved=await store.put(item.collection,item.id,item.record);
+  pendingWrites.delete(pendingKey(item));
+  return {durable:true,record:saved};
+ }catch(error){
+  await wal.append({type:"sovereign-store-write",...item,failedAt:new Date().toISOString()});
+  pendingWrites.set(pendingKey(item),item);
+  return {durable:false,error:String(error?.message||error).slice(0,300)};
  }
 }
-async function sniff(){if(stopping)return;try{await sniper.start();const events=await sniper.poll();for(const e of events){if(pool)await pool.query("INSERT INTO raw_liquidity_events(fingerprint,block_number,transaction_hash,token0,token1,fee,tick_spacing,pool,observed_at,payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(fingerprint) DO NOTHING",[e.fingerprint,e.blockNumber,e.transactionHash,e.token0,e.token1,e.fee,e.tickSpacing,e.pool,e.observedAt,e]);}sniperState={status:"ok",events:sniperState.events+events.length,lastBlock:sniper.lastBlock,error:null};}catch(e){sniperState={...sniperState,status:"error",error:String(e?.message||e)}}}
+async function flushPendingWrites(){
+ if(!pendingWrites.size||!store.configured)return;
+ const batch=[...pendingWrites.values()].slice(0,50);
+ try{
+  await store.bulk(batch);
+  for(const item of batch)pendingWrites.delete(pendingKey(item));
+ }catch(error){
+  console.warn("sovereign outbox sync deferred",JSON.stringify({pending:pendingWrites.size,error:String(error?.message||error).slice(0,240)}));
+ }
+}
+function liveOpportunityId(opportunity){
+ const key=[opportunity.kind,opportunity.chain_id,opportunity.token_in,opportunity.token_out,opportunity.buy_pool,opportunity.sell_pool,opportunity.buy_fee,opportunity.sell_fee].map(value=>String(value??"")).join("|");
+ return "live-"+crypto.createHash("sha256").update(key).digest("hex");
+}
+async function ingest(source,payload,sequence=null){
+ const e=normalizeEvent({source,payload,sequence});
+ const result=await persist("koin_kob_ingestion_events",e.fingerprint,{...e,id:e.fingerprint,status:"received",createdAt:e.observed_at,updatedAt:e.observed_at});
+ return {...e,durable:result.durable,...(result.error?{storageError:result.error}:{})};
+}
+async function sniff(){
+ if(stopping)return;
+ try{
+  await sniper.start();
+  const events=await sniper.poll();
+  let writeFailures=0;
+  for(const e of events){
+   const saved=await persist("koin_kob_raw_liquidity_events",e.fingerprint,{...e,id:e.fingerprint,source:"live",observed_at:e.observedAt,createdAt:e.observedAt});
+   if(!saved.durable)writeFailures++;
+  }
+  sniperState={status:writeFailures?"degraded":"ok",events:sniperState.events+events.length,lastBlock:sniper.lastBlock,error:writeFailures?writeFailures+" event writes buffered locally":null};
+ }catch(e){sniperState={...sniperState,status:"error",error:String(e?.message||e)}}
+}
 async function scan(){
  if(stopping)return;
  try{
   const result=await scanner.scan();
-  for(const opportunity of result.opportunities)if(queue)await queue.saveOpportunity(opportunity,opportunity.observed_at);
-  lastScan={status:"ok",pools:result.pools,opportunities:result.opportunities.length,rpcErrors:result.rpcErrors||[],diagnostics:result.diagnostics||null,at:new Date().toISOString(),error:null};console.log("scan complete",JSON.stringify(lastScan));
-  if(pool)await pool.query("INSERT INTO engine_state(key,value,updated_at) VALUES('scanner',$1,now()) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=now()",[lastScan]);
+  const now=new Date().toISOString();
+  let durableWrites=0,writeFailures=0;
+  for(const opportunity of result.opportunities){
+   const id=liveOpportunityId(opportunity);
+   const record={...opportunity,id,source:"live",sourceFingerprint:opportunity.fingerprint,createdAt:now,updatedAt:now};
+   const saved=await persist("koin_kob_opportunities",id,record);
+   if(saved.durable)durableWrites++;else writeFailures++;
+  }
+  lastScan={status:writeFailures?"degraded":"ok",pools:result.pools,opportunities:result.opportunities.length,durableWrites,pendingLocalWrites:pendingWrites.size,rpcErrors:result.rpcErrors||[],diagnostics:result.diagnostics||null,at:now,error:writeFailures?writeFailures+" opportunity writes buffered locally":null};
+  await persist("koin_kob_engine_state","scanner",{key:"scanner",value:lastScan,updatedAt:now});
+  console.log("scan complete",JSON.stringify(lastScan));
  }catch(e){lastScan={...lastScan,status:"error",at:new Date().toISOString(),error:String(e?.message||e)};console.error("scanner",e)}
 }
 
