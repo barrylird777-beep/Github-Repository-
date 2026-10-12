@@ -6,7 +6,7 @@ services:
     region: ohio
     repo: https://github.com/barrylird777-beep/Github-Repository-
     branch: main
-    buildCommand: npm install --omit=dev --no-audit --no-fund
+    buildCommand: npm install --no-audit --no-fund && npm run check && npm test && npm prune --omit=dev
     startCommand: npm start
     autoDeploy: true
     healthCheckPath: /health
