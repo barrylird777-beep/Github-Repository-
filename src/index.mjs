@@ -45,7 +45,7 @@ async function saveOpportunity(o){
  opportunities.set(fp,o);
  if(apiBase&&apiToken&&(changed||now-(remoteSyncedAt.get(fp)||0)>=300000)){
   try{await postOpportunityToSovereignApi(o);}
-  catch(e){remoteStoreState={configured:true,status:"degraded",lastSyncAt:remoteStoreState.lastSyncAt,error:String(e?.message||e).slice(0,300)};}
+  catch(e){remoteStoreState={configured:true,status:"degraded",lastSyncAt:remoteStoreState.lastSyncAt,error:String(e?.message||e).slice(0,300)};console.error("sovereign opportunity sync",remoteStoreState.error);}
  }
 }
 async function opportunityFeed(){
