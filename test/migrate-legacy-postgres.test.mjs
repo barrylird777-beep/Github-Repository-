@@ -12,6 +12,21 @@ function makeStore() {
       records.set(`${collection}:${id}`, value);
       return value;
     }
+    async putMany(items) {
+      let written = 0;
+      let existing = 0;
+      const values = [];
+      for (const item of items) {
+        const key = `${item.collection}:${item.id}`;
+        const found = records.get(key);
+        if (found) { existing += 1; values.push(found); continue; }
+        const value = { ...item.record, id: String(item.id), updatedAt: item.record.updatedAt || new Date().toISOString() };
+        records.set(key, value);
+        written += 1;
+        values.push(value);
+      }
+      return { written, existing, records: values };
+    }
   };
 }
 
