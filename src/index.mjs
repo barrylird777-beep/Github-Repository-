@@ -23,7 +23,7 @@ let sniperState={status:"starting",events:0,lastBlock:0,error:null};
 let lastScan={status:"not_run",pools:0,opportunities:0,at:null,error:null};
 let stopping=false;
 
-async function ingest(source,payload,sequence=null){const e=normalizeEvent({source,payload,sequence});await wal.append({type:"ingest-event",event:e});return e}
+async function ingest(source,payload,sequence=null){const e=normalizeEvent({source,payload,sequence});await wal.append({type:"ingest-event",event:e});if(payload?.opportunity)await queue.saveOpportunity(payload.opportunity,e.observed_at);return e}
 async function work(){
  const result=await queue.flushPending();
  if(result.pending)console.warn("sovereign opportunity sync pending",result.pending,queue.status().lastError||"");
