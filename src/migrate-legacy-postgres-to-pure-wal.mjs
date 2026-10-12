@@ -19,7 +19,7 @@ export async function migrateLegacyPostgresToPureWal({ remoteStore, databaseUrl,
     pool = new Pool({ connectionString: databaseUrl, max: 2, idleTimeoutMillis: 10000, connectionTimeoutMillis: 10000 });
   }
 
-  const counts = { ingestionEvents: 0, opportunities: 0, engineState: 0, rawLiquidityEvents: 0 };
+  const counts = { ingestionEvents: 0, opportunities: 0, engineState: 0, rawLiquidityEvents: 0, existingRecords: 0 };
   const iso = value => value ? new Date(value).toISOString() : new Date().toISOString();
 
   async function copyPaged(sql, collection, mapper, countKey) {
@@ -30,10 +30,15 @@ export async function migrateLegacyPostgresToPureWal({ remoteStore, databaseUrl,
       for (const row of result.rows) {
         const id = String(row.fingerprint || '');
         if (!id) continue;
+        const existing = await remoteStore.get(collection, id);
+        if (existing) {
+          counts.existingRecords += 1;
+          continue;
+        }
         await remoteStore.put(collection, id, mapper(row, id));
+        counts[countKey] += 1;
       }
       lastId = Number(result.rows[result.rows.length - 1].id);
-      counts[countKey] += result.rows.length;
     }
   }
 
@@ -69,8 +74,13 @@ export async function migrateLegacyPostgresToPureWal({ remoteStore, databaseUrl,
 
     const state = await pool.query('SELECT key,value,updated_at FROM engine_state ORDER BY key ASC');
     for (const row of state.rows) {
-      await remoteStore.put('koin_kob_engine_state', String(row.key), {
-        id: String(row.key), key: String(row.key), value: row.value, updatedAt: iso(row.updated_at)
+      const id = String(row.key);
+      if (await remoteStore.get('koin_kob_engine_state', id)) {
+        counts.existingRecords += 1;
+        continue;
+      }
+      await remoteStore.put('koin_kob_engine_state', id, {
+        id, key: id, value: row.value, updatedAt: iso(row.updated_at)
       });
       counts.engineState += 1;
     }
