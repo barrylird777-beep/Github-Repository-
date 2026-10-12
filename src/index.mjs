@@ -16,8 +16,6 @@ const remoteStore=new RemotePureWalStore({baseUrl:config.apiUrl,token:config.opp
 await migrateLegacyPostgresToPureWal({remoteStore,databaseUrl:config.databaseUrl});
 const queue=new PureWalQueue(remoteStore,{leaseSeconds:config.leaseSeconds,maxAttempts:config.maxAttempts});
 await queue.recoverExpired();
-const queue=new PureWalQueue(remoteStore,{leaseSeconds:config.leaseSeconds,maxAttempts:config.maxAttempts});
-await queue.recoverExpired();
 const scanner=new UniswapV3Scanner({rpcUrl:config.rpcUrl,chainId:config.chainId,notionalUsd:config.scanNotionalUsd});
 const sniper=new RawSniper({rpcUrl:config.rpcUrl,chainId:config.chainId});
 const bountyScanner=new BountyScanner({token:process.env.GITHUB_TOKEN||""});
