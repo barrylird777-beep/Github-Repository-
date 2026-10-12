@@ -20,10 +20,13 @@ test('remote Pure-WAL client sends the scoped token and uses get/query/put endpo
   assert.equal((await store.get('koin_kob_opportunities', 'opp-1')).id, 'opp-1');
   assert.equal((await store.query('koin_kob_opportunities', { kind: 'arbitrage' }, { sortField: 'estimated_net_profit_usd', descending: true, limit: 10 }))[0].id, 'opp-1');
   assert.equal((await store.put('koin_kob_opportunities', 'opp-1', { kind: 'arbitrage' })).id, 'opp-1');
+  const bulk = await store.putMany([{ collection: 'koin_kob_opportunities', id: 'opp-2', record: { kind: 'arbitrage' } }]);
+  assert.equal(bulk.records[0].id, 'opp-1');
   assert.deepEqual(calls.map(call => call.url), [
     'https://apex.example/api/internal/opportunity-engine/store/get',
     'https://apex.example/api/internal/opportunity-engine/store/query',
-    'https://apex.example/api/internal/opportunity-engine/store/put'
+    'https://apex.example/api/internal/opportunity-engine/store/put',
+    'https://apex.example/api/internal/opportunity-engine/store/bulk'
   ]);
   assert.ok(calls.every(call => call.options.headers['x-apex-opportunity-token'] === 'test-token'));
   assert.equal(calls[1].body.sortField, 'estimated_net_profit_usd');
