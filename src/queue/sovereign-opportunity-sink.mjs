@@ -10,6 +10,7 @@ export class SovereignOpportunitySink {
     this.readyPromise = null;
     this.lastError = null;
     this.lastSuccessAt = null;
+    this.flushing = false;
   }
 
   async init() {
@@ -62,11 +63,14 @@ export class SovereignOpportunitySink {
 
   async flushPending() {
     await this.init();
+    if (this.flushing) return { delivered: 0, pending: this.pending.size };
     if (!this.apiUrl || !this.token) {
       this.lastError = "Sovereign API URL or opportunity token is not configured";
       return { delivered: 0, pending: this.pending.size };
     }
     let delivered = 0;
+    this.flushing = true;
+    try {
     for (const [fingerprint, opportunity] of this.pending) {
       let response;
       try {
@@ -94,6 +98,9 @@ export class SovereignOpportunitySink {
       delivered++;
     }
     return { delivered, pending: this.pending.size };
+    } finally {
+      this.flushing = false;
+    }
   }
 
   async listOpportunities(limit = 100) {
