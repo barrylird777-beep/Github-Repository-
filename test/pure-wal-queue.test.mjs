@@ -45,7 +45,7 @@ test('Pure-WAL queue deduplicates, leases, and processes an ingestion event', as
 
 test('Pure-WAL queue recovers expired leases and dead-letters exhausted retries', async () => {
   const store = makeStore();
-  const queue = new PureWalQueue(store, { leaseSeconds: 10, maxAttempts: 1 });
+  const queue = new PureWalQueue(store, { leaseSeconds: 10, maxAttempts: 2 });
   await queue.enqueue({ fingerprint: 'event-2', source: 'test', payload: {} });
   const [job] = await queue.claim(1);
   await store.put('koin_kob_ingestion_events', job.id, { ...job, leaseUntil: new Date(Date.now() - 1000).toISOString() });
