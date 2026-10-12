@@ -25,6 +25,7 @@ const evalHelper=new AiEvalHelper();
 const mesh=process.env.MESH_SECRET?new PrivateMesh({secret:process.env.MESH_SECRET,maxLanes:8,peers:(()=>{try{return process.env.MESH_PEERS?JSON.parse(process.env.MESH_PEERS):[]}catch{return[]}})()}):null;
 let sniperState={status:"starting",events:0,lastBlock:0,error:null};
 let lastScan={status:"not_run",pools:0,opportunities:0,at:null,error:null};
+const persistedScan=await remoteStore.get("koin_kob_engine_state","scanner");if(persistedScan?.value&&typeof persistedScan.value==="object")lastScan=persistedScan.value;
 let stopping=false;
 
 async function ingest(source,payload,sequence=null){const e=normalizeEvent({source,payload,sequence});await queue.enqueue(e);return e}
