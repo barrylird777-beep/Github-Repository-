@@ -14,16 +14,17 @@ import {AiEvalHelper} from "./eval/ai-eval-helper.mjs";
 const wal=new Wal(config.walDir);await wal.init();
 const store=new SovereignApiStore({baseUrl:config.apexApiUrl,token:config.opportunityToken});
 const pendingWrites=new Map();
-const pendingKey=item=>String(item.collection)+":"+String(item.id);
 await wal.replay(async event=>{
- if(event?.type==="sovereign-store-write"&&typeof event.collection==="string"&&typeof event.id==="string"&&event.record&&typeof event.record==="object"){
-  pendingWrites.set(pendingKey(event),{collection:event.collection,id:event.id,record:event.record});
+ if(event?.type==="pending-opportunity"&&typeof event.id==="string"&&event.opportunity&&typeof event.opportunity==="object"){
+  pendingWrites.set(event.id,{id:event.id,opportunity:event.opportunity});
+ }else if(event?.type==="ack-opportunity"&&typeof event.id==="string"){
+  pendingWrites.delete(event.id);
  }
 });
 if(String(process.env.MIGRATE_POSTGRES_TO_SOVEREIGN||"").toLowerCase()==="true"){
- const {migratePostgresToSovereign}=await import("../scripts/migrate-postgres-to-sovereign.mjs");
- const migrated=await migratePostgresToSovereign({databaseUrl:config.legacyMigrationDatabaseUrl,store});
- console.log("legacy opportunity data copied into sovereign Pure-WAL",JSON.stringify(migrated));
+ const {migratePostgresOpportunitiesToKashKorner}=await import("../scripts/migrate-postgres-to-sovereign.mjs");
+ const migrated=await migratePostgresOpportunitiesToKashKorner({databaseUrl:config.legacyMigrationDatabaseUrl,api:store});
+ console.log("legacy opportunities copied into KashKorner Pure-WAL",JSON.stringify(migrated));
 }
 const scanner=new UniswapV3Scanner({rpcUrl:config.rpcUrl,chainId:config.chainId,notionalUsd:config.scanNotionalUsd});
 const sniper=new RawSniper({rpcUrl:config.rpcUrl,chainId:config.chainId});
