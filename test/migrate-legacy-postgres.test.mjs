@@ -46,7 +46,7 @@ test('legacy migration copies all four datasets into KoinKob Pure-WAL and marks 
     logger: { log: (...args) => logs.push(args.join(' ')) }
   });
   assert.equal(result.skipped, false);
-  assert.deepEqual(result.counts, { ingestionEvents: 1, opportunities: 1, engineState: 1, rawLiquidityEvents: 1 });
+  assert.deepEqual(result.counts, { ingestionEvents: 1, opportunities: 1, engineState: 1, rawLiquidityEvents: 1, existingRecords: 0 });
   assert.equal((await store.get('koin_kob_ingestion_events', 'evt-1')).status, 'queued');
   assert.equal((await store.get('koin_kob_opportunities', 'opp-1')).estimated_net_profit_usd, 11);
   assert.equal((await store.get('koin_kob_engine_state', 'scanner')).value.status, 'ok');
