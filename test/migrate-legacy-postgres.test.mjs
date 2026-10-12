@@ -79,6 +79,23 @@ test('legacy migration copies all four datasets into KoinKob Pure-WAL and marks 
   assert.equal(secondRun.skipped, true);
 });
 
+test('legacy migration never overwrites an existing Pure-WAL opportunity', async () => {
+  const store = makeStore();
+  await store.put('koin_kob_opportunities', 'opp-1', {
+    id: 'opp-1', fingerprint: 'opp-1', kind: 'arbitrage', estimated_net_profit_usd: 999
+  });
+  const pool = makePool();
+  const result = await migrateLegacyPostgresToPureWal({
+    remoteStore: store,
+    databaseUrl: 'postgres://legacy.invalid/test',
+    poolFactory: async () => pool,
+    logger: { log: () => {} }
+  });
+  assert.equal(result.counts.existingRecords, 1);
+  assert.equal(result.counts.opportunities, 0);
+  assert.equal((await store.get('koin_kob_opportunities', 'opp-1')).estimated_net_profit_usd, 999);
+});
+
 test('legacy migration skips PostgreSQL when no source URL is configured', async () => {
   const store = makeStore();
   const result = await migrateLegacyPostgresToPureWal({
