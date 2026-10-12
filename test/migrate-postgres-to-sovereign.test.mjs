@@ -1,29 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { migratePostgresToSovereign } from "../scripts/migrate-postgres-to-sovereign.mjs";
+import { migratePostgresOpportunitiesToKashKorner } from "../scripts/migrate-postgres-to-sovereign.mjs";
 
-test("legacy opportunity migration copies records to Pure-WAL without mutating PostgreSQL", async () => {
+test("legacy opportunity migration copies records to KashKorner without mutating PostgreSQL", async () => {
   const tables = {
     opportunities: [{
       id: 1, fingerprint: "a".repeat(64), kind: "uniswap-v3-cross-pool", chain_id: 1,
+      token_in: "0xabc", token_out: "0xdef", buy_pool: "0x111", sell_pool: "0x222",
       gross_edge_bps: "45.5", estimated_gas_usd: "8", estimated_slippage_usd: "2.1",
       estimated_net_profit_usd: "3.2", observed_at: new Date("2026-10-01T00:00:00Z"), payload: {}
     }],
-    ingestion_events: [{
-      id: 2, fingerprint: "b".repeat(64), source: "test", sequence: 1, payload: { ok: true },
-      observed_at: new Date("2026-10-01T00:00:00Z"), status: "processed", attempts: 1,
-      created_at: new Date("2026-10-01T00:00:00Z"), updated_at: new Date("2026-10-01T00:00:01Z")
-    }],
-    ingestion_dead_letter: [{
-      id: 3, fingerprint: "c".repeat(64), source: "test", payload: { failed: true },
-      attempts: 8, last_error: "test failure", failed_at: new Date("2026-10-01T00:00:02Z")
-    }],
-    raw_liquidity_events: [{
-      id: 4, fingerprint: "d".repeat(64), block_number: "100", transaction_hash: "0x123",
-      token0: "0xabc", token1: "0xdef", fee: 3000, tick_spacing: 60, pool: "0x456",
-      observed_at: new Date("2026-10-01T00:00:03Z"), payload: {}
-    }],
-    engine_state: [{ key: "scanner", value: { status: "ok" }, updated_at: new Date("2026-10-01T00:00:04Z") }]
+    ingestion_events: [{ id: 2 }],
+    ingestion_dead_letter: [{ id: 3 }],
+    raw_liquidity_events: [{ id: 4 }],
+    engine_state: [{ key: "scanner" }]
   };
   const queries = [];
   const pool = {
@@ -33,41 +23,37 @@ test("legacy opportunity migration copies records to Pure-WAL without mutating P
         const table = params[0];
         return { rows: [{ table_name: Object.hasOwn(tables, table) ? table : null }] };
       }
-      const match = sql.match(/FROM\s+(\w+)/i);
-      assert.ok(match, "migration query must target a known table");
-      const rows = tables[match[1]] || [];
+      if (/COUNT\(\*\)/i.test(sql)) {
+        const table = sql.match(/FROM\s+(\w+)/i)?.[1];
+        return { rows: [{ rows: (tables[table] || []).length }] };
+      }
+      const rows = tables.opportunities;
       const limit = Number(params[0]);
       const offset = Number(params[1]);
       return { rows: rows.slice(offset, offset + limit) };
     }
   };
-  const written = [];
-  const persisted = new Map();
-  const store = {
+  const saved = [];
+  const api = {
     configured: true,
-    async get(collection, id) {
-      return persisted.get(collection + ":" + id) ?? null;
-    },
-    async put(collection, id, record) {
-      persisted.set(collection + ":" + id, record);
-      return record;
-    },
-    async bulk(items) {
-      written.push(...items);
-      return { success: true, written: items.length, existing: 0, records: items.map(item => item.record) };
+    async saveOpportunity(opportunity) {
+      saved.push(opportunity);
+      return { success: true };
     }
   };
 
-  const result = await migratePostgresToSovereign({ store, pool, pageSize: 10, batchSize: 2 });
+  const result = await migratePostgresOpportunitiesToKashKorner({ api, pool, pageSize: 10, writeConcurrency: 2 });
   assert.equal(result.databaseModified, false);
-  assert.equal(result.rowsRead, 5);
-  assert.equal(result.written, 5);
-  assert.equal(result.complete, true);
-  assert.equal((await store.get("koin_kob_engine_state", "legacy-postgres-migration-v1")).value.complete, true);
-  assert.equal(written.length, 5);
-  assert.ok(written.some(item => item.collection === "koin_kob_opportunities" && typeof item.record.estimated_net_profit_usd === "number"));
-  assert.ok(written.some(item => item.collection === "koin_kob_ingestion_events" && item.record.status === "dead-letter"));
-  assert.ok(written.some(item => item.collection === "koin_kob_raw_liquidity_events" && item.record.blockNumber === 100));
-  assert.ok(written.some(item => item.collection === "koin_kob_engine_state" && item.id === "scanner"));
+  assert.equal(result.rowsRead, 1);
+  assert.equal(result.saved, 1);
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].fingerprint, "a".repeat(64));
+  assert.equal(saved[0].estimated_net_profit_usd, 3.2);
+  assert.deepEqual(result.retainedInLegacyDatabase, {
+    ingestion_events: 1,
+    ingestion_dead_letter: 1,
+    raw_liquidity_events: 1,
+    engine_state: 1
+  });
   assert.ok(queries.every(sql => /^SELECT/i.test(sql.trim())), "migration must never mutate the source database");
 });
