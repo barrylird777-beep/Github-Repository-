@@ -41,4 +41,14 @@ export class RemotePureWalStore {
     const result = await this.request('put', { collection, id, record });
     return result.record;
   }
+
+  async putMany(items) {
+    if (!Array.isArray(items) || !items.length || items.length > 100) throw new Error('Pure-WAL bulk writes require 1 to 100 items');
+    const result = await this.request('bulk', { items });
+    return {
+      written: Number(result.written || 0),
+      existing: Number(result.existing || 0),
+      records: Array.isArray(result.records) ? result.records : []
+    };
+  }
 }
