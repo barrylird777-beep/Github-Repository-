@@ -30,7 +30,7 @@ function restoreRecord(r){
 await wal.replay(restoreRecord);
 async function postOpportunityToSovereignApi(o){
  if(!apiBase||!apiToken)return false;
- const response=await fetch(apiBase+"/api/kash-korner/opportunities",{method:"POST",headers:{"content-type":"application/json","x-apex-opportunity-token":apiToken},body:JSON.stringify(o),signal:AbortSignal.timeout(8000)});
+ const response=await fetch(apiBase+"/api/kash-korner/opportunities",{method:"POST",headers:{"content-type":"application/json","x-apex-opportunity-token":apiToken,authorization:"Bearer "+apiToken},body:JSON.stringify(o),signal:AbortSignal.timeout(8000)});
  if(!response.ok)throw new Error("Sovereign opportunity API HTTP "+response.status);
  remoteStoreState={configured:true,status:"connected",lastSyncAt:new Date().toISOString(),error:null};
  remoteSyncedAt.set(String(o.fingerprint),Date.now());
