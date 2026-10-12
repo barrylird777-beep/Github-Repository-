@@ -42,8 +42,16 @@ test("legacy opportunity migration copies records to Pure-WAL without mutating P
     }
   };
   const written = [];
+  const persisted = new Map();
   const store = {
     configured: true,
+    async get(collection, id) {
+      return persisted.get(collection + ":" + id) ?? null;
+    },
+    async put(collection, id, record) {
+      persisted.set(collection + ":" + id, record);
+      return record;
+    },
     async bulk(items) {
       written.push(...items);
       return { success: true, written: items.length, existing: 0, records: items.map(item => item.record) };
@@ -54,6 +62,8 @@ test("legacy opportunity migration copies records to Pure-WAL without mutating P
   assert.equal(result.databaseModified, false);
   assert.equal(result.rowsRead, 5);
   assert.equal(result.written, 5);
+  assert.equal(result.complete, true);
+  assert.equal((await store.get("koin_kob_engine_state", "legacy-postgres-migration-v1")).value.complete, true);
   assert.equal(written.length, 5);
   assert.ok(written.some(item => item.collection === "koin_kob_opportunities" && typeof item.record.estimated_net_profit_usd === "number"));
   assert.ok(written.some(item => item.collection === "koin_kob_ingestion_events" && item.record.status === "dead-letter"));
