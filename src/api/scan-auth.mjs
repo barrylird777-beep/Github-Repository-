@@ -2,7 +2,8 @@ import { timingSafeEqual } from "node:crypto";
 
 export function authorizeScanRequest(
   req,
-  token = process.env.APEX_OPPORTUNITY_ENGINE_TOKEN ||
+  token = process.env.APEX_ZERO_TRUST_TOKEN ||
+    process.env.APEX_OPPORTUNITY_ENGINE_TOKEN ||
     process.env.APEX_OPPORTUNITY_ENGINE_SYNC_TOKEN ||
     process.env.OPPORTUNITY_SCAN_TOKEN
 ) {
