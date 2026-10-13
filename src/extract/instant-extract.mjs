@@ -49,8 +49,10 @@ export function isBlockedAddress(address) {
   // Only globally-routable IPv6 unicast space is accepted.
   const first = parseInt(s.split(":").find(Boolean) || "0", 16);
   if (first < 0x2000 || first > 0x3fff) return true;
+  const groups = s.split(":");
+  const second = parseInt(groups[1] || "0", 16);
   if (s.startsWith("2001:db8:") || s === "2001:db8" ||
-      s.startsWith("2001:") || s.startsWith("2002:")) return true;
+      (s.startsWith("2001:") && second <= 0x01ff) || s.startsWith("2002:")) return true;
   return false;
 }
 
@@ -92,7 +94,7 @@ function requestPinned(url, addresses, maxBytes) {
       lookup: (_hostname, options, callback) => {
         const candidates = addresses.filter(record => !options.family || record.family === options.family);
         if (!candidates.length) return callback(new Error("no vetted address for destination"), "", 0);
-        if (options.all) return callback(null, candidates.map(record => ({ address: record.address, family: record.family }));
+        if (options.all) return callback(null, candidates.map(record => ({ address: record.address, family: record.family })));
         callback(null, candidates[0].address, candidates[0].family);
       }
     }, response => {
