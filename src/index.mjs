@@ -8,6 +8,7 @@ import {BountyScanner} from "./bounty/bounty-scanner.mjs";
 import {handleInstantExtract} from "./api/instant-extract-route.mjs";
 import {AiEvalHelper} from "./eval/ai-eval-helper.mjs";
 import { authorizeScanRequest } from "./api/scan-auth.mjs";
+import {fetchWithRetry} from "./network/retry-fetch.mjs";
 import { unavailableOpportunityFeed, opportunityStorageName } from "./api/opportunity-store-policy.mjs";
 
 const opportunities=new Map(),ingestionEvents=new Map(),rawLiquidityEvents=new Map(),remoteSyncedAt=new Map();
@@ -20,7 +21,7 @@ let lastScan={status:"not_run",pools:0,opportunities:0,at:null,error:null};
 let stopping=false;
 async function postOpportunityToSovereignApi(o){
  if(!apiBase||!apiToken)return false;
- const response=await fetch(apiBase+"/api/kash-korner/opportunities",{method:"POST",headers:{"content-type":"application/json","x-apex-opportunity-token":apiToken,authorization:"Bearer "+apiToken},body:JSON.stringify(o),signal:AbortSignal.timeout(8000)});
+ const response=await fetchWithRetry(apiBase+"/api/kash-korner/opportunities",{method:"POST",headers:{"content-type":"application/json","x-apex-opportunity-token":apiToken,authorization:"Bearer "+apiToken,"idempotency-key":String(o.fingerprint||"")},body:JSON.stringify(o),signal:AbortSignal.timeout(8000)},{attempts:4,baseDelayMs:250,maxDelayMs:2000});
  if(!response.ok){const detail=await response.text().catch(()=> "");throw new Error("Sovereign opportunity API HTTP "+response.status+(detail?": "+detail.slice(0,240):""));}
  remoteStoreState={configured:true,status:"connected",lastSyncAt:new Date().toISOString(),error:null};
  remoteSyncedAt.set(String(o.fingerprint),Date.now());
@@ -45,7 +46,7 @@ async function saveOpportunity(o){
 async function opportunityFeed(){
  if(apiBase&&apiToken){
   try{
-   const response=await fetch(apiBase+"/api/kash-korner/opportunities?limit=100",{cache:"no-store",signal:AbortSignal.timeout(5000)});
+   const response=await fetchWithRetry(apiBase+"/api/kash-korner/opportunities?limit=100",{cache:"no-store",signal:AbortSignal.timeout(5000)},{attempts:4,baseDelayMs:200,maxDelayMs:1500});
    if(!response.ok)throw new Error("Sovereign opportunity feed HTTP "+response.status);
    const data=await response.json();
    remoteStoreState={configured:true,status:"connected",lastSyncAt:remoteStoreState.lastSyncAt,error:null};
