@@ -1,0 +1,42 @@
+name: Security Baseline
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-baseline-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependency-and-secret-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies without lifecycle scripts
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Audit dependency advisories
+        run: npm audit --audit-level=high
+
+      - name: Scan tracked working-tree files for secrets
+        run: >-
+          docker run --rm
+          -v "${{ github.workspace }}:/repo"
+          zricethezav/gitleaks:v8.24.3
+          detect --source=/repo --no-git --redact --exit-code 1
